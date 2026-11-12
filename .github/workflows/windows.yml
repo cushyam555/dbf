@@ -26,6 +26,11 @@ jobs:
       - name: Test core and publish portable EXE
         shell: pwsh
         run: ./build.ps1
+      - name: Exercise duplicate filtering and copy/move UI on fixture files
+        shell: pwsh
+        run: |
+          dotnet run --project UiChecks/Mixer.UiChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw "Windows UI checks failed" }
       - name: Verify Windows application opens
         shell: pwsh
         run: |
