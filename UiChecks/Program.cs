@@ -60,6 +60,7 @@ internal static class Program
         foreach (var (dir, ext) in new[] { ("Song", ".mid"), ("Lyrics", ".lyr"), ("Cursor", ".cur") })
             Put(Path.Combine(folders.Ncn, dir, "x", code + ext), "fixture " + code + ext);
         await w.LoadDatabaseFile(dbf);
+        Check(new[] { "ExtremePath", "EmkPath", "NcnPath" }.All(n => Grid.GetColumn(Control<TextBox>(w, n)) == 1 && Control<TextBox>(w, n).ActualWidth > 300), "folder paths have their own readable layout column");
         Check(Control<TextBlock>(w, "TotalText").Text == "4", "load actual Song.dbf into screen");
         Check(Control<DataGrid>(w, "SongsGrid").Columns.Count >= 6, "display all database columns");
         Click(w, "FilterTitleButton"); await Ready(w);
@@ -119,9 +120,10 @@ internal static class Program
     static void windowPreview(MainWindow window)
     {
         window.UpdateLayout();
-        var dpi = VisualTreeHelper.GetDpi(window);
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(window.ActualHeight * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        var visual = (FrameworkElement)window.Content;
+        var dpi = VisualTreeHelper.GetDpi(visual);
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(visual.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(visual.ActualHeight * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var folder = Path.Combine(Environment.CurrentDirectory, "dist"); Directory.CreateDirectory(folder);
         using var output = File.Create(Path.Combine(folder, "MixerStudio-preview.png")); encoder.Save(output);
