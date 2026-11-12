@@ -3,6 +3,8 @@ name: Build Windows EXE
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +28,7 @@ jobs:
       - name: Test core and publish portable EXE
         shell: pwsh
         run: ./build.ps1
-      - name: Exercise duplicate filtering and copy/move UI on fixture files
+      - name: Exercise review, saved work, parking and restore UI
         shell: pwsh
         run: |
           dotnet run --project UiChecks/Mixer.UiChecks.csproj -c Release
