@@ -18,6 +18,10 @@ public partial class MainWindow : Window
     bool busy, loaded, mustReload;
     readonly string settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixerStudio", "settings.json");
     DataTable? Kept => selection?.Kept ?? all;
+    internal Func<string, string, MessageBoxButton, MessageBoxImage, MessageBoxResult, MessageBoxResult>? DialogOverride { get; set; }
+    MessageBoxResult Dialog(string message, string title, MessageBoxButton buttons = MessageBoxButton.OK, MessageBoxImage image = MessageBoxImage.None, MessageBoxResult defaultResult = MessageBoxResult.None)
+        => DialogOverride != null ? DialogOverride(message, title, buttons, image, defaultResult) : MessageBox.Show(this, message, title, buttons, image, defaultResult);
+
     public MainWindow()
     {
         InitializeComponent();
@@ -168,7 +172,7 @@ public partial class MainWindow : Window
         {
             var plan = await Prepare();
             if (plan == null) { StatusText.Text = "ยังไม่มีเพลงที่จะส่งออก"; return; }
-            MessageBox.Show(this, $"รายการ {plan.Songs.Count:N0} เพลง\nพร้อมส่งออก {plan.Ready:N0} เพลง\nไฟล์ขาด / ต้องตรวจสอบ {plan.Missing:N0} เพลง\n\nปลายทาง:\n{plan.ExportRoot}\n\n" + string.Join("\n", plan.Songs.Where(s => s.Problems.Count > 0).Take(8).Select(s => s.Kind + " " + s.OldCode + ": " + string.Join("; ", s.Problems))), "ตรวจไฟล์ก่อนส่งออก");
+            Dialog($"รายการ {plan.Songs.Count:N0} เพลง\nพร้อมส่งออก {plan.Ready:N0} เพลง\nไฟล์ขาด / ต้องตรวจสอบ {plan.Missing:N0} เพลง\n\nปลายทาง:\n{plan.ExportRoot}\n\n" + string.Join("\n", plan.Songs.Where(s => s.Problems.Count > 0).Take(8).Select(s => s.Kind + " " + s.OldCode + ": " + string.Join("; ", s.Problems))), "ตรวจไฟล์ก่อนส่งออก");
             StatusText.Text = $"ตรวจแล้ว • พร้อม {plan.Ready:N0} • ต้องตรวจสอบ {plan.Missing:N0} เพลง";
         }
         catch (OperationCanceledException) { StatusText.Text = "หยุดตรวจไฟล์แล้ว"; }
@@ -182,22 +186,22 @@ public partial class MainWindow : Window
         if (busy || mustReload || Kept == null || Kept.Rows.Count == 0) return;
         if (move)
         {
-            if (MessageBox.Show(this, $"จะย้ายเพลงที่เก็บไว้ {Kept.Rows.Count:N0} เพลงไปยัง Export และเปลี่ยนรหัสใหม่\nไฟล์เหล่านี้จะออกจากต้นทาง ส่วนเพลงซ้ำที่คัดออกยังอยู่ต้นทาง\n\n{Folders.ExportRoot}\n\nต้องการดำเนินการหรือไม่?", "ยืนยันการย้ายเพลง", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-            if (MessageBox.Show(this, "ยืนยันอีกครั้ง: รหัสเพลงจะเปลี่ยน และต้องจัดทำฐานข้อมูลใน Extreme ใหม่หลังย้าย\nดำเนินการต่อหรือไม่?", "ยืนยันการเปลี่ยนรหัส", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            if (Dialog($"จะย้ายเพลงที่เก็บไว้ {Kept.Rows.Count:N0} เพลงไปยัง Export และเปลี่ยนรหัสใหม่\nไฟล์เหล่านี้จะออกจากต้นทาง ส่วนเพลงซ้ำที่คัดออกยังอยู่ต้นทาง\n\n{Folders.ExportRoot}\n\nต้องการดำเนินการหรือไม่?", "ยืนยันการย้ายเพลง", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            if (Dialog("ยืนยันอีกครั้ง: รหัสเพลงจะเปลี่ยน และต้องจัดทำฐานข้อมูลใน Extreme ใหม่หลังย้าย\nดำเนินการต่อหรือไม่?", "ยืนยันการเปลี่ยนรหัส", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         }
         Start("กำลังตรวจไฟล์ก่อนส่งออก…"); Progress.IsIndeterminate = true;
         try
         {
             var plan = await Prepare(); if (plan == null) return;
             if (plan.Ready == 0) throw new InvalidOperationException("ไม่พบชุดไฟล์ที่พร้อมส่งออก • กดตรวจไฟล์ก่อนส่งออกเพื่อดูรายละเอียด");
-            if (plan.Missing > 0 && MessageBox.Show(this, $"มีชุดไฟล์ไม่ครบ {plan.Missing:N0} เพลง จะข้ามรายการเหล่านี้\nส่งออกเฉพาะ {plan.Ready:N0} เพลงที่ครบหรือไม่?", "พบไฟล์ขาด", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) { StatusText.Text = "ยกเลิกส่งออกแล้ว"; return; }
+            if (plan.Missing > 0 && Dialog($"มีชุดไฟล์ไม่ครบ {plan.Missing:N0} เพลง จะข้ามรายการเหล่านี้\nส่งออกเฉพาะ {plan.Ready:N0} เพลงที่ครบหรือไม่?", "พบไฟล์ขาด", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) { StatusText.Text = "ยกเลิกส่งออกแล้ว"; return; }
             Progress.IsIndeterminate = false;
             var progress = new Progress<ExportProgress>(p => { Progress.Value = p.Total == 0 ? 0 : p.Done * 100.0 / p.Total; StatusText.Text = $"{(move ? "ย้าย" : "สำเนา")} {p.Done:N0}/{p.Total:N0} เพลง • {p.Kind} {p.Code}"; ProgressText.Text = $"EMK: {p.EmkDone:N0} · NCN: {p.NcnDone:N0}"; });
             // Any interrupted move may already have changed files: require a fresh DBF before another run.
             if (move) mustReload = true;
             var result = await Task.Run(() => Reconstruction.ExecuteAsync(plan, move, progress, job!.Token));
             StatusText.Text = $"{(result.Cancelled ? "หยุดแล้ว" : "เสร็จแล้ว")} • สำเนา {result.Copied:N0} / ย้าย {result.Moved:N0} ไฟล์ • ข้าม {result.Skipped:N0} / ผิดพลาด {result.Failed:N0} เพลง";
-            MessageBox.Show(this, StatusText.Text + "\n\nรายงาน:\n" + result.Report + (move ? "\n\nกรุณาจัดทำฐานข้อมูล Extreme ใหม่ แล้วเปิด Song.dbf ใหม่ก่อนทำงานต่อ" : ""), "ผลการส่งออก");
+            Dialog(StatusText.Text + "\n\nรายงาน:\n" + result.Report + (move ? "\n\nกรุณาจัดทำฐานข้อมูล Extreme ใหม่ แล้วเปิด Song.dbf ใหม่ก่อนทำงานต่อ" : ""), "ผลการส่งออก");
         }
         catch (OperationCanceledException) { StatusText.Text = "หยุดตรวจไฟล์แล้ว"; }
         catch (Exception ex) { Error(ex); }
@@ -218,6 +222,6 @@ public partial class MainWindow : Window
     }
     void UpdateButtons() { CopyButton.IsEnabled = MoveButton.IsEnabled = !busy && !mustReload && Kept?.Rows.Count > 0; }
     void StopClick(object sender, RoutedEventArgs e) { job?.Cancel(); StopButton.IsEnabled = false; StatusText.Text = "กำลังหยุด • จะทำชุดไฟล์เพลงปัจจุบันให้เสร็จก่อน"; }
-    void Error(Exception ex) { StatusText.Text = "ทำงานไม่สำเร็จ"; MessageBox.Show(this, ex.Message, "ทำงานไม่สำเร็จ", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    void Error(Exception ex) { StatusText.Text = "ทำงานไม่สำเร็จ"; Dialog(ex.Message, "ทำงานไม่สำเร็จ", MessageBoxButton.OK, MessageBoxImage.Warning); }
     void OnClosing(object? sender, CancelEventArgs e) { if (busy) { e.Cancel = true; job?.Cancel(); StatusText.Text = "กำลังหยุดงาน • เมื่อหยุดแล้วสามารถปิดหน้าต่างได้"; } }
 }

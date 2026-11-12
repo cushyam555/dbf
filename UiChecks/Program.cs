@@ -1,7 +1,6 @@
 using System.Data;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -96,39 +95,26 @@ internal static class Program
     static async Task WithDialogs(MainWindow window, string button, Dictionary<string, int> answers)
     {
         var observed = new HashSet<string>();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(35));
-        var responder = Task.Run(async () =>
+        // Native message boxes use the normal production implementation. Only this fixture runner supplies responses.
+        window.DialogOverride = (message, title, buttons, image, defaultResult) =>
         {
-            while (!stop.IsCancellationRequested)
-            {
-                EnumWindows((handle, _) =>
-                {
-                    GetWindowThreadProcessId(handle, out var pid); if (pid != Environment.ProcessId) return true;
-                    var title = new StringBuilder(256); GetWindowText(handle, title, title.Capacity);
-                    if (answers.TryGetValue(title.ToString(), out int answer))
-                    {
-                        lock (observed) observed.Add(title.ToString());
-                        PostMessage(handle, 0x0111, (IntPtr)answer, IntPtr.Zero);
-                    }
-                    return true;
-                }, IntPtr.Zero);
-                await Task.Delay(40);
-            }
-        });
+            if (!answers.TryGetValue(title, out int answer)) throw new InvalidOperationException("Unexpected UI dialog: " + title + " / " + message);
+            observed.Add(title);
+            if (title.StartsWith("ยืนยัน")) Check(buttons == MessageBoxButton.YesNo && defaultResult == MessageBoxResult.No, "move confirmation defaults to No");
+            return answer == 6 ? MessageBoxResult.Yes : MessageBoxResult.OK;
+        };
         try
         {
             Click(window, button);
             var timer = Stopwatch.StartNew();
-            while (true)
+            while (!observed.Contains("ผลการส่งออก") || Control<Button>(window, "StopButton").IsEnabled)
             {
-                bool seen; lock (observed) seen = observed.Contains("ผลการส่งออก");
-                if (seen && !Control<Button>(window, "StopButton").IsEnabled) break;
                 if (timer.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Button did not complete: " + button + " / " + Control<TextBlock>(window, "StatusText").Text);
                 await Task.Delay(50);
             }
-            lock (observed) foreach (string title in answers.Keys) Check(observed.Contains(title), button + " dialog: " + title);
+            foreach (string title in answers.Keys) Check(observed.Contains(title), button + " dialog: " + title);
         }
-        finally { stop.Cancel(); await responder; }
+        finally { window.DialogOverride = null; }
     }
     static void windowPreview(MainWindow window)
     {
@@ -150,9 +136,4 @@ internal static class Program
         foreach (var name in columns) { var descriptor = new byte[32]; Encoding.ASCII.GetBytes(name).CopyTo(descriptor, 0); descriptor[11] = (byte)'C'; descriptor[16] = 40; writer.Write(descriptor); } writer.Write((byte)13);
         foreach (var row in rows) { writer.Write((byte)' '); foreach (var cell in row) writer.Write(Encoding.ASCII.GetBytes(cell.PadRight(40))); } writer.Write((byte)26);
     }
-    delegate bool EnumCallback(IntPtr window, IntPtr parameter);
-    [DllImport("user32.dll")] static extern bool EnumWindows(EnumCallback callback, IntPtr parameter);
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder title, int count);
-    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
 }
