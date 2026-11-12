@@ -177,6 +177,113 @@ try
     var afterOne = await Reconstruction.ExecuteAsync(two, false, new DirectProgress(_ => between.Cancel()), between.Token);
     Check(afterOne.Cancelled && afterOne.Copied == 1, "cancellation between songs preserves completed output");
     Check(!Directory.EnumerateFiles(folders.ExportRoot, "*.partial-*", SearchOption.AllDirectories).Any(), "no unfinished temporary output");
+    // Group decisions, resumable work, and reversible duplicate parking.
+    var featureRoot = Path.Combine(temporary, "FeatureExtreme");
+    var featureFolders = SourceFolders.FromExtreme(featureRoot);
+    void FeaturePut(string kind, string branch, string code, string body)
+    {
+        var path = kind == "EMK" ? Path.Combine(featureFolders.Emk, "x", code + ".emk") : Path.Combine(featureFolders.Ncn, branch, "x", code + (branch == "Song" ? ".mid" : branch == "Lyrics" ? ".lyr" : ".cur"));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, body);
+    }
+    FeaturePut("EMK", "", "A", "keep EMK");
+    foreach (string code in new[] { "B", "C" }) foreach (string branch in new[] { "Song", "Lyrics", "Cursor" }) FeaturePut("NCN", branch, code, code + branch + "ภาษาไทย");
+    var features = Fixture.Table(); Fixture.Add(features, "B", "NCN", "same", "artist", "lyric"); Fixture.Add(features, "A", "EMK", "same", "artist", "lyric"); Fixture.Add(features, "C", "NCN", "other", "artist2", "lyric2");
+    var featureDbf = Path.Combine(featureRoot, "song.dbf"); Fixture.WriteDbf(featureDbf, features);
+    var featureAll = SongSelection.Load(featureDbf, true);
+    var featureSelection = SongSelection.Filter(featureAll, DuplicateRule.TitleAndLyric, true);
+    var bRow = featureAll.AsEnumerable().Single(r => r["CODE"].ToString()!.Trim() == "B");
+    var manual = new Dictionary<string, int> { [SongSelection.GroupKey(bRow, DuplicateRule.TitleAndLyric)] = (int)bRow[SongSelection.RowId] };
+    var manualResult = SongSelection.Filter(featureAll, DuplicateRule.TitleAndLyric, true, default, manual);
+    Check(Codes(manualResult.Kept) == "B|C", "manual group winner overrides EMK priority");
+    Check(Codes(manualResult.Duplicates) == "A", "manual winner updates discarded alternatives");
+    Check(manualResult.Review.AsEnumerable().Where(r => (int)r["จำนวนในกลุ่ม"] == 2).All(r => r["เก็บรหัส"].ToString() == "B" && r["เหตุผล"].ToString()!.Contains("เลือกผู้เก็บเอง")), "group review explains explicit decisions");
+    Check(Codes(SongSelection.Filter(featureAll, DuplicateRule.ArtistAndLyric, true, default, manual).Kept) == "A|C", "manual choices do not leak to a different duplicate rule");
+    var workspacePath = Path.Combine(temporary, "choices.mixwork");
+    var info = new WorkspaceInfo(1, featureFolders, featureDbf, Workspace.HashFile(featureDbf), DuplicateRule.TitleAndLyric, true, 'Z', 20000, true, manual, false, null);
+    Workspace.Save(workspacePath, info, featureAll);
+    var reopened = Workspace.Load(workspacePath);
+    Check(reopened.Info.Folders == featureFolders && reopened.Info.Unlimited && reopened.Info.Start == 'Z', "workspace restores paths and export options");
+    Check(reopened.Info.DatabaseHash == Workspace.HashFile(featureDbf), "workspace retains source DBF fingerprint");
+    Check(reopened.Songs.Rows.Count == featureAll.Rows.Count && reopened.Songs.Columns.Count == featureAll.Columns.Count, "workspace restores full database schema and rows");
+    for (int i = 0; i < featureAll.Rows.Count; i++) Check(reopened.Songs.Rows[i].ItemArray.SequenceEqual(featureAll.Rows[i].ItemArray), "workspace exact DBF data roundtrip " + i);
+    Check(Codes(SongSelection.Filter(reopened.Songs, reopened.Info.Rule!.Value, reopened.Info.EmkFirst, default, reopened.Info.Choices).Kept) == "B|C", "saved manual choices resume without reopening DBF");
+    Workspace.Save(workspacePath, info with { MustReload = true }, featureAll);
+    Check(Workspace.Load(workspacePath).Info.MustReload, "workspace retains stale-database lock after file moves");
+    var badWorkspace = Path.Combine(temporary, "bad.mixwork"); File.WriteAllText(badWorkspace, "not a workspace");
+    Throws<InvalidDataException>(() => Workspace.Load(badWorkspace), "malformed workspace rejected");
+    var featurePlan = Reconstruction.Plan(featureSelection.Kept, featureFolders, '0', null);
+    var summary = OperationSummary.Create(featurePlan, 3, 2, 1);
+    Check(summary.Loaded == 3 && summary.Kept == 2 && summary.Duplicates == 1 && summary.ReadySongs == 2 && summary.Files == 4, "preflight summary includes retained/discarded songs and files");
+    Check(summary.Bytes == featurePlan.Songs.SelectMany(s => s.Files).Sum(f => new FileInfo(f.Source).Length), "preflight summary byte total matches actual files");
+    var sameSource = featurePlan.Songs[0].Files[0];
+    var twice = new ExportPlan(featurePlan.ExportRoot, [new("A", "X1", "EMK", [sameSource], []), new("A", "X2", "EMK", [sameSource with { Target = sameSource.Target + "2" }], [])]);
+    var twiceSummary = OperationSummary.Create(twice, 2, 2, 0);
+    Check(twiceSummary.Files == 2 && twiceSummary.Bytes == 2 * new FileInfo(sameSource.Source).Length, "summary counts repeated source writes and required copy bytes");
+    var invalidManual = new Dictionary<string, int>(manual) { [SongSelection.GroupKey(bRow, DuplicateRule.TitleAndLyric)] = int.MaxValue };
+    Throws<InvalidDataException>(() => SongSelection.Filter(featureAll, DuplicateRule.TitleAndLyric, true, default, invalidManual), "invalid saved manual winner cannot silently fall back");
+    var park = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    Check(park.Ready == 1 && park.Songs.Single().OldCode == "B" && park.Songs.Single().Files.Count == 3, "parking plan contains only discarded NCN triplet");
+    var originalBytes = park.Songs.SelectMany(s => s.Files).ToDictionary(f => f.Source, f => File.ReadAllBytes(f.Source));
+    var parked = await Hold.ExecuteAsync(park, featureFolders, null, default);
+    Check(parked.Moved == 3 && parked.Failed == 0 && File.Exists(parked.Manifest), "duplicate parking creates recoverable manifest");
+    Check(park.Songs.SelectMany(s => s.Files).All(f => !File.Exists(f.Source) && File.Exists(f.Target)), "discarded triplet moved into holding folder");
+    Check(featurePlan.Songs.SelectMany(s => s.Files).All(f => File.Exists(f.Source)), "retained songs untouched by parking");
+    var restored = await Hold.RestoreAsync(parked.Manifest, featureFolders, default);
+    Check(restored.Restored == 3 && restored.Failed == 0, "restore parked NCN triplet");
+    Check(originalBytes.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value)), "restoration preserves every original byte and path");
+    var repeatRestore = await Hold.RestoreAsync(parked.Manifest, featureFolders, default);
+    Check(repeatRestore.Restored == 0 && repeatRestore.AlreadyRestored == 3, "repeated restore is idempotent");
+    var conflictPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var conflictHold = await Hold.ExecuteAsync(conflictPlan, featureFolders, null, default);
+    var conflictFile = conflictPlan.Songs[0].Files[0]; File.WriteAllText(conflictFile.Source, "new original at occupied source");
+    var conflictRestore = await Hold.RestoreAsync(conflictHold.Manifest, featureFolders, default);
+    Check(conflictRestore.Failed == 1 && File.ReadAllText(conflictFile.Source) == "new original at occupied source" && File.Exists(conflictFile.Target), "restore never overwrites an occupied original path");
+    File.Delete(conflictFile.Source);
+    Check((await Hold.RestoreAsync(conflictHold.Manifest, featureFolders, default)).Restored == 1, "restore can resume after conflict is resolved");
+    var tamperPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var tamperHold = await Hold.ExecuteAsync(tamperPlan, featureFolders, null, default);
+    var tamperFile = tamperPlan.Songs[0].Files[0]; File.AppendAllText(tamperFile.Target, "changed");
+    var tampered = await Hold.RestoreAsync(tamperHold.Manifest, featureFolders, default);
+    Check(tampered.Failed == 1 && !File.Exists(tamperFile.Source) && File.Exists(tamperFile.Target), "checksum rejects modified parked data without deleting it");
+    File.WriteAllBytes(tamperFile.Target, originalBytes[tamperFile.Source]);
+    Check((await Hold.RestoreAsync(tamperHold.Manifest, featureFolders, default)).Restored == 1, "restore resumes after parked data repaired");
+    // Journal intent is enough to recover a move if the process stopped before recording completion.
+    var crashPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var crashHold = await Hold.ExecuteAsync(crashPlan, featureFolders, null, default);
+    var crashJournal = Path.Combine(crashPlan.ExportRoot, "mixer-hold.journal.jsonl");
+    var intents = File.ReadAllLines(crashJournal).Where(l => l.Contains("\"intent\"")); File.WriteAllLines(crashJournal, intents);
+    File.AppendAllText(crashJournal, "{partial");
+    Check((await Hold.RestoreAsync(crashHold.Manifest, featureFolders, default)).Restored == 3, "recover parked files from intent and truncated journal tail");
+    Check((await Hold.RestoreAsync(crashHold.Manifest, featureFolders, default)).AlreadyRestored == 3, "repaired journal supports another resume");
+    var noNewlinePlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var noNewlineHold = await Hold.ExecuteAsync(noNewlinePlan, featureFolders, null, default);
+    var noNewlineJournal = Path.Combine(noNewlinePlan.ExportRoot, "mixer-hold.journal.jsonl");
+    File.WriteAllText(noNewlineJournal, File.ReadAllText(noNewlineJournal).TrimEnd('\r', '\n'));
+    Check((await Hold.RestoreAsync(noNewlineHold.Manifest, featureFolders, default)).Restored == 3, "restore accepts a complete final journal event without newline");
+    Check((await Hold.RestoreAsync(noNewlineHold.Manifest, featureFolders, default)).AlreadyRestored == 3, "journal appends remain parseable after missing newline recovery");
+    // One DBF duplicate can point to the same physical file as the winner: never park that shared file.
+    var sharedTable = Fixture.Table(); Fixture.Add(sharedTable, "A", "EMK", "shared", "artist", "line"); Fixture.Add(sharedTable, "A", "EMK", "shared", "artist", "line");
+    var sharedSelection = SongSelection.Filter(SongSelection.Eligible(sharedTable, true), DuplicateRule.TitleAndLyric, true);
+    var sharedPlan = Hold.Plan(sharedSelection.Duplicates, sharedSelection.Kept, featureFolders);
+    Check(sharedPlan.Ready == 0 && sharedPlan.Songs[0].Problems.Any(p => p.Contains("ร่วม")), "shared retained file cannot be quarantined");
+    var cancelPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    using var cancelPark = new CancellationTokenSource(); cancelPark.Cancel();
+    var noPark = await Hold.ExecuteAsync(cancelPlan, featureFolders, null, cancelPark.Token);
+    Check(noPark.Cancelled && noPark.Moved == 0 && originalBytes.Keys.All(File.Exists), "parking cancellation leaves originals untouched");
+    // A later missing companion triggers a rollback of earlier files in that NCN set.
+    var rollbackPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var missingLater = rollbackPlan.Songs[0].Files.Last(); File.Delete(missingLater.Source);
+    var rolledBack = await Hold.ExecuteAsync(rollbackPlan, featureFolders, null, default);
+    Check(rolledBack.Failed == 1 && rollbackPlan.Songs[0].Files.Take(2).All(f => File.Exists(f.Source) && !File.Exists(f.Target)), "partial parking failure rolls back completed companions");
+    File.WriteAllBytes(missingLater.Source, originalBytes[missingLater.Source]);
+    // A modified manifest cannot restore into a directory outside the selected library roots.
+    var guardPlan = Hold.Plan(featureSelection.Duplicates, featureSelection.Kept, featureFolders);
+    var guardHold = await Hold.ExecuteAsync(guardPlan, featureFolders, null, default);
+    var guardManifest = JsonSerializer.Deserialize<HoldManifest>(File.ReadAllText(guardHold.Manifest))!;
+    var originalEntry = guardManifest.Entries[0]; guardManifest.Entries[0] = originalEntry with { Source = Path.Combine(temporary, "outside.mid") };
+    File.WriteAllText(guardHold.Manifest, JsonSerializer.Serialize(guardManifest));
+    bool restoreRejected = false; try { await Hold.RestoreAsync(guardHold.Manifest, featureFolders, default); } catch (InvalidDataException) { restoreRejected = true; }
+    Check(restoreRejected && !File.Exists(Path.Combine(temporary, "outside.mid")), "restore validates paths against selected library folders");
     Console.WriteLine($"All {passed} checks passed.");
 }
 finally { Directory.Delete(temporary, true); }
