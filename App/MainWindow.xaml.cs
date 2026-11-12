@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Data;
 using System.IO;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -16,7 +15,6 @@ public partial class MainWindow : Window
     DuplicateRule? rule;
     CancellationTokenSource? job;
     bool busy, loaded, mustReload;
-    readonly string settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixerStudio", "settings.json");
     DataTable? Kept => selection?.Kept ?? all;
     internal Func<string, string, MessageBoxButton, MessageBoxImage, MessageBoxResult, MessageBoxResult>? DialogOverride { get; set; }
     MessageBoxResult Dialog(string message, string title, MessageBoxButton buttons = MessageBoxButton.OK, MessageBoxImage image = MessageBoxImage.None, MessageBoxResult defaultResult = MessageBoxResult.None)
@@ -26,17 +24,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         StartLetter.ItemsSource = Reconstruction.Alphabet.Select(c => c.ToString()).ToArray(); StartLetter.SelectedIndex = 0;
-        try
-        {
-            if (File.Exists(settings)) SetFolders(JsonSerializer.Deserialize<SourceFolders>(File.ReadAllText(settings))!);
-            else
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Company\App");
-                var previous = key?.GetValue("Folder_Extreme") as string;
-                if (!string.IsNullOrWhiteSpace(previous)) SetFolders(SourceFolders.FromExtreme(previous));
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { StatusText.Text = "อ่านการตั้งค่าเดิมไม่ได้ • เลือกโฟลเดอร์ใหม่ได้"; }
         loaded = true;
     }
     SourceFolders Folders => new(ExtremePath.Text, EmkPath.Text, NcnPath.Text);
@@ -46,12 +33,7 @@ public partial class MainWindow : Window
         ExtremePath.Text = folders.Extreme; EmkPath.Text = folders.Emk; NcnPath.Text = folders.Ncn;
         ExportPath.Text = "ปลายทาง: " + folders.ExportRoot;
     }
-    void SaveFolders()
-    {
-        try { Directory.CreateDirectory(Path.GetDirectoryName(settings)!); File.WriteAllText(settings, JsonSerializer.Serialize(Folders)); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { StatusText.Text = "ใช้โฟลเดอร์ที่เลือกได้ แต่บันทึกการตั้งค่าไม่ได้: " + ex.Message; }
-        ExportPath.Text = "ปลายทาง: " + Folders.ExportRoot;
-    }
+    void UpdateExportPath() => ExportPath.Text = "ปลายทาง: " + Folders.ExportRoot;
     string? Pick(string title, string current)
     {
         var dialog = new OpenFolderDialog { Title = title };
@@ -61,10 +43,10 @@ public partial class MainWindow : Window
     void ChooseExtreme(object sender, RoutedEventArgs e)
     {
         var path = Pick("เลือกโฟลเดอร์ Extreme Karaoke", ExtremePath.Text);
-        if (path != null) { SetFolders(SourceFolders.FromExtreme(path)); SaveFolders(); }
+        if (path != null) { ExtremePath.Text = path; UpdateExportPath(); }
     }
-    void ChooseEmk(object sender, RoutedEventArgs e) { var path = Pick("เลือกโฟลเดอร์เพลง EMK", EmkPath.Text); if (path != null) { EmkPath.Text = path; SaveFolders(); } }
-    void ChooseNcn(object sender, RoutedEventArgs e) { var path = Pick("เลือกโฟลเดอร์ NCN ที่มี Song, Lyrics, Cursor", NcnPath.Text); if (path != null) { NcnPath.Text = path; SaveFolders(); } }
+    void ChooseEmk(object sender, RoutedEventArgs e) { var path = Pick("เลือกโฟลเดอร์เพลง EMK", EmkPath.Text); if (path != null) { EmkPath.Text = path; UpdateExportPath(); } }
+    void ChooseNcn(object sender, RoutedEventArgs e) { var path = Pick("เลือกโฟลเดอร์ NCN ที่มี Song, Lyrics, Cursor", NcnPath.Text); if (path != null) { NcnPath.Text = path; UpdateExportPath(); } }
     async void OpenDatabase(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Title = "เปิดฐานข้อมูล Song.dbf", Filter = "DBF (*.dbf)|*.dbf", FileName = "song.dbf" };

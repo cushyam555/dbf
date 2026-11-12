@@ -1,10 +1,10 @@
-# Mixer Studio 0.2 — คัดเพลงซ้ำจาก Song.dbf
+# Mixer Studio 0.2.1 — คัดเพลงซ้ำจาก Song.dbf
 
 ## เตรียมต้นทาง
 
 ใช้ Windows 10/11 แบบ 64 บิต แตก ZIP แล้วเปิด MixerStudio.exe
 
-เลือกโฟลเดอร์ Extreme Karaoke โปรแกรมเติมค่า EMK และ NCN ให้อัตโนมัติ และเลือกเปลี่ยนแยกได้:
+ช่อง Extreme, EMK และ NCN เริ่มว่างทุกครั้งที่เปิดโปรแกรม ให้ผู้ใช้เลือกทั้งสามโฟลเดอร์ด้วยตนเอง โปรแกรมไม่อ่านค่าจาก Registry หรือไฟล์ตั้งค่าเดิม และไม่เติม EMK/NCN ตาม Extreme อัตโนมัติ ตัวอย่างโครงสร้างที่ใช้ทั่วไป:
 
 - EMK: `<Extreme>/Songs/MIDI/EMK`
 - NCN: `<Extreme>/Songs/MIDI/NCN` ภายในมี `Song`, `Lyrics`, `Cursor`
