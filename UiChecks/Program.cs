@@ -52,6 +52,7 @@ internal static class Program
     static void Click(MainWindow w, string name) => Control<Button>(w, name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     static async Task Test(MainWindow w, string root)
     {
+        windowPreview(w);
         var folders = SourceFolders.FromExtreme(root); w.SetFolders(folders);
         var dbf = Path.Combine(root, "song.dbf"); WriteDbf(dbf);
         void Put(string path, string data) { Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, data); }
@@ -68,7 +69,7 @@ internal static class Program
         Check(Control<TextBlock>(w, "DuplicateText").Text == "1", "duplicate counter matches title rule");
         Click(w, "FilterArtistButton"); await Ready(w);
         Check(Codes(w) == "A,D", "artist + lyric button keeps expected songs");
-        windowPreview(w);
+        windowPreview(w, "MixerStudio-filtered-preview.png");
         Control<CheckBox>(w, "EmkFirst").IsChecked = false; await Ready(w);
         Check(Codes(w) == "B,D", "NCN priority changes retained song");
         Control<ComboBox>(w, "ViewMode").SelectedIndex = 1;
@@ -120,7 +121,7 @@ internal static class Program
         }
         finally { window.DialogOverride = null; }
     }
-    static void windowPreview(MainWindow window)
+    static void windowPreview(MainWindow window, string name = "MixerStudio-preview.png")
     {
         window.UpdateLayout();
         var visual = (FrameworkElement)window.Content;
@@ -129,7 +130,7 @@ internal static class Program
         bitmap.Render(visual);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var folder = Path.Combine(Environment.CurrentDirectory, "dist"); Directory.CreateDirectory(folder);
-        using var output = File.Create(Path.Combine(folder, "MixerStudio-preview.png")); encoder.Save(output);
+        using var output = File.Create(Path.Combine(folder, name)); encoder.Save(output);
         Check(output.Length > 0, "save real WPF screen preview");
     }
     static void WriteDbf(string path)
