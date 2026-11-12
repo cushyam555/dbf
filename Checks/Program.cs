@@ -142,6 +142,11 @@ try
     for (int i = 0; i < 5; i++) Fixture.Add(numberTable, "M" + i, "EMK", "T" + i, "A", "L" + i);
     var numberPlan = Reconstruction.Plan(numberTable, folders, '9', 2);
     Check(string.Join(',', numberPlan.Songs.Select(s => s.NewCode)) == "900001,900002,A00001,A00002,B00001", "numbering rollover 9 to A to B");
+    Check(Reconstruction.OutputCode(99998, 'A', null) == ("A", "A99999"), "unlimited numbering at old boundary");
+    Check(Reconstruction.OutputCode(99999, 'A', null) == ("A", "A100000"), "unlimited numbering extends to six numeric digits");
+    Check(Reconstruction.OutputCode(1000000, 'Z', null) == ("Z", "Z1000001"), "unlimited numbering stays in chosen folder beyond alphabet capacity");
+    var unlimitedPlan = Reconstruction.Plan(numberTable, folders, 'Z', null);
+    Check(string.Join(',', unlimitedPlan.Songs.Select(s => s.NewCode)) == "Z00001,Z00002,Z00003,Z00004,Z00005", "unlimited plan does not split or apply Z folder capacity");
     Check(numberPlan.Songs.All(s => s.Problems.Count > 0), "missing source files detected before export");
     Check(numberPlan.Songs[1].NewCode == "900002", "missing file still reserves reference numbering slot");
     Throws<InvalidOperationException>(() => Reconstruction.Plan(numberTable, folders, 'Z', 2), "export capacity validated");

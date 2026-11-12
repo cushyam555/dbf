@@ -33,7 +33,7 @@ public partial class MainWindow : Window
         ExtremePath.Text = folders.Extreme; EmkPath.Text = folders.Emk; NcnPath.Text = folders.Ncn;
         ExportPath.Text = "ปลายทาง: " + folders.ExportRoot;
     }
-    void UpdateExportPath() => ExportPath.Text = "ปลายทาง: " + Folders.ExportRoot;
+    void UpdateExportPath() => ExportPath.Text = string.IsNullOrWhiteSpace(ExtremePath.Text) ? "ปลายทาง: เลือกโฟลเดอร์ Extreme ก่อน" : "ปลายทาง: " + Folders.ExportRoot;
     string? Pick(string title, string current)
     {
         var dialog = new OpenFolderDialog { Title = title };
@@ -138,12 +138,18 @@ public partial class MainWindow : Window
         if (e.Column is DataGridBoundColumn column)
             column.Binding = new Binding(e.PropertyName) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.LostFocus };
     }
+    void UnlimitedChanged(object sender, RoutedEventArgs e) { if (PerFolder != null) PerFolder.IsEnabled = UnlimitedFolder.IsChecked != true; }
     async Task<ExportPlan?> Prepare()
     {
         if (Kept == null || Kept.Rows.Count == 0 || mustReload) return null;
         SongsGrid.CommitEdit(); SongsGrid.CommitEdit();
         if (ExtremePath.Text.Length == 0 || EmkPath.Text.Length == 0 || NcnPath.Text.Length == 0) throw new InvalidOperationException("เลือกโฟลเดอร์ Extreme, EMK และ NCN ให้ครบก่อน");
-        if (!int.TryParse(PerFolder.Text, out var count)) throw new InvalidOperationException("กรอกจำนวนเพลงต่อโฟลเดอร์เป็นตัวเลข 1–99,999");
+        int? count = null;
+        if (UnlimitedFolder.IsChecked != true)
+        {
+            if (!int.TryParse(PerFolder.Text, out var parsed)) throw new InvalidOperationException("กรอกจำนวนเพลงต่อโฟลเดอร์เป็นตัวเลข 1–99,999 หรือเลือกไม่จำกัด");
+            count = parsed;
+        }
         var folders = Folders; var first = StartLetter.SelectedItem?.ToString()?[0] ?? '0'; var kept = Kept;
         return await Task.Run(() => Reconstruction.Plan(kept, folders, first, count, job!.Token));
     }

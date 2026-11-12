@@ -81,6 +81,9 @@ internal static class Program
         Control<TextBox>(w, "Search").Text = "B";
         Check(Codes(w) == "B", "search filters visible table");
         // Export must still include all retained rows even while the table search shows only B.
+        Control<TextBox>(w, "PerFolder").Text = "1";
+        Control<CheckBox>(w, "UnlimitedFolder").IsChecked = true;
+        Check(!Control<TextBox>(w, "PerFolder").IsEnabled, "unlimited option disables the numeric folder limit");
         await WithDialogs(w, "CopyButton", new() { ["ผลการส่งออก"] = 1 });
         Check(Directory.GetFiles(Path.Combine(folders.ExportRoot, "NCN", "Export", "Song", "0")).Length == 2, "copy button exports both retained songs despite table search");
         Check(File.Exists(Path.Combine(folders.Ncn, "Song", "x", "B.mid")), "copy button preserves source");

@@ -20,10 +20,10 @@ public record ReconstructionResult(string Report, int Copied, int Moved, int Fai
 public static class Reconstruction
 {
     public const string Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    public static ExportPlan Plan(DataTable kept, SourceFolders folders, char start, int perFolder, CancellationToken token = default)
+    public static ExportPlan Plan(DataTable kept, SourceFolders folders, char start, int? perFolder, CancellationToken token = default)
     {
         int first = Alphabet.IndexOf(start);
-        if (first < 0 || perFolder < 1 || perFolder > 99999) throw new ArgumentException("จำนวนเพลงต่อโฟลเดอร์ต้องเป็น 1–99,999 และตัวอักษรต้องเป็น 0–9 หรือ A–Z");
+        if (first < 0 || (perFolder.HasValue && (perFolder.Value < 1 || perFolder.Value > 99999))) throw new ArgumentException("โหมดแบ่งโฟลเดอร์ต้องกำหนด 1–99,999 เพลง หรือเลือกไม่จำกัด และตัวอักษรต้องเป็น 0–9 หรือ A–Z");
         string exportRoot = Path.GetFullPath(folders.ExportRoot);
         foreach (var source in new[] { folders.Emk, folders.Ncn })
             if (Inside(exportRoot, source) || Inside(source, exportRoot)) throw new InvalidOperationException("โฟลเดอร์ Export ต้องแยกจากโฟลเดอร์เพลงต้นทาง");
@@ -32,7 +32,7 @@ public static class Reconstruction
         {
             // Exact subtype matching at export is also the reference behavior.
             var table = new DataView(kept) { RowFilter = $"SUB_TYPE like '{kind}'" }.ToTable();
-            if (table.Rows.Count > (Alphabet.Length - first) * perFolder) throw new InvalidOperationException($"เพลง {kind} เกินจำนวนที่ส่งออกได้จากตัวอักษร {start} ({(Alphabet.Length - first) * perFolder:N0} เพลง)");
+            if (perFolder is int limit && table.Rows.Count > (Alphabet.Length - first) * limit) throw new InvalidOperationException($"เพลง {kind} เกินจำนวนที่ส่งออกได้จากตัวอักษร {start} ({(Alphabet.Length - first) * limit:N0} เพลง)");
             if (table.Rows.Count == 0) continue;
             var primaryRoot = kind == "EMK" ? folders.Emk : Path.Combine(folders.Ncn, "Song");
             var primary = Index(primaryRoot, token);
@@ -42,8 +42,7 @@ public static class Reconstruction
             {
                 token.ThrowIfCancellationRequested();
                 var old = table.Rows[i]["CODE"].ToString()!.Trim();
-                var folder = Alphabet[first + i / perFolder].ToString();
-                var code = folder + (i % perFolder + 1).ToString("00000");
+                var (folder, code) = OutputCode(i, start, perFolder);
                 var files = new List<OutputFile>(); var errors = new List<string>();
                 if (old.Length == 0 || old.IndexOfAny(['/', '\\', '\0']) >= 0) errors.Add("รหัสเพลงไม่ถูกต้อง");
                 string? source = errors.Count == 0 ? Find(primary, old + (kind == "EMK" ? ".emk" : ".mid")) : null;
@@ -67,6 +66,16 @@ public static class Reconstruction
             }
         }
         return new(exportRoot, plan);
+    }
+    public static (string Folder, string Code) OutputCode(int index, char start, int? perFolder)
+    {
+        int first = Alphabet.IndexOf(start);
+        if (index < 0 || first < 0 || (perFolder.HasValue && (perFolder.Value < 1 || perFolder.Value > 99999))) throw new ArgumentOutOfRangeException(nameof(index));
+        long folderIndex = perFolder.HasValue ? first + (long)index / perFolder.Value : first;
+        if (folderIndex >= Alphabet.Length) throw new InvalidOperationException("จำนวนเพลงเกินความจุของตัวอักษรที่เหลือ");
+        var folder = Alphabet[(int)folderIndex].ToString();
+        long number = perFolder.HasValue ? index % perFolder.Value + 1L : index + 1L;
+        return (folder, folder + number.ToString("00000", System.Globalization.CultureInfo.InvariantCulture));
     }
     static Dictionary<string, List<string>> Index(string root, CancellationToken token)
     {
