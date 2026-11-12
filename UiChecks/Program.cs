@@ -82,7 +82,14 @@ internal static class Program
         int Id(string code) => ((DataView)Control<DataGrid>(w, "SongsGrid").ItemsSource).Cast<DataRowView>().Single(r => r["CODE"].ToString()!.Trim() == code).Row.Field<int>(SongSelection.RowId);
         int candidateC = Id("C"); int candidateB = Id("B");
         Control<ComboBox>(w, "ViewMode").SelectedIndex = 0;
-        w.GroupsOverride = groupWindow => { groupWindow.PickCandidate(candidateC); groupWindow.Show(); windowPreview(groupWindow, "MixerStudio-groups.png"); groupWindow.Close(); return true; };
+        w.GroupsOverride = groupWindow =>
+        {
+            groupWindow.Show();
+            var grid = (DataGrid)groupWindow.FindName("Candidates");
+            grid.SelectedItem = ((DataView)grid.ItemsSource).Cast<DataRowView>().Single(row => row.Row.Field<int>(SongSelection.RowId) == candidateC);
+            ((Button)groupWindow.FindName("KeepCandidate")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            windowPreview(groupWindow, "MixerStudio-groups.png"); groupWindow.Close(); return true;
+        };
         Click(w, "GroupsButton"); await Ready(w); w.GroupsOverride = null;
         Check(Codes(w) == "C,D", "group picker changes the retained winner");
         Control<CheckBox>(w, "UnlimitedFolder").IsChecked = true;

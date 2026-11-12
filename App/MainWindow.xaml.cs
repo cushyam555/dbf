@@ -325,7 +325,7 @@ public partial class MainWindow : Window
         try
         {
             var result = await Task.Run(() => Hold.RestoreAsync(path, folders, job!.Token));
-            StatusText.Text = $"กู้คืน {result.Restored:N0} • คืนแล้ว {result.AlreadyRestored:N0} • ผิดพลาด {result.Failed:N0} ไฟล์";
+            StatusText.Text = (result.Cancelled ? "หยุดกู้คืนแล้ว • เปิดรายการเดิมเพื่อทำต่อได้ • " : "") + $"กู้คืน {result.Restored:N0} • คืนแล้ว {result.AlreadyRestored:N0} • ผิดพลาด {result.Failed:N0} ไฟล์";
             Dialog(StatusText.Text + "\n\n" + string.Join("\n", result.Errors.Take(10)) + "\nจัดทำฐานข้อมูล Extreme ใหม่ก่อนทำงานต่อ", "ผลการกู้คืนเพลง");
         }
         catch (OperationCanceledException) { StatusText.Text = "หยุดกู้คืนแล้ว • เปิดรายการเดิมเพื่อทำต่อได้"; }
