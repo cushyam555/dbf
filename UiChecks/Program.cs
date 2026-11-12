@@ -17,7 +17,8 @@ internal static class Program
     [STAThread] static int Main()
     {
         int result = 1;
-        var app = new App(); app.InitializeComponent(); app.StartupUri = null;
+        var app = new Application();
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/MixerStudio;component/Theme.xaml", UriKind.Relative) });
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var window = new MainWindow();
         var timeout = new DispatcherTimer { Interval = TimeSpan.FromMinutes(2) };
