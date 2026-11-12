@@ -1,0 +1,66 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Test and package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test core and publish portable EXE
+        shell: pwsh
+        run: ./build.ps1
+      - name: Verify Windows application opens
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "$PWD/dist/MixerStudio.exe" -PassThru
+          try {
+            $opened = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              if ($process.HasExited) { throw "Application exited before opening a window (code $($process.ExitCode))" }
+              if ($process.MainWindowHandle -ne 0) {
+                if ($process.MainWindowTitle -notlike 'Mixer Studio*') { throw "Unexpected window: $($process.MainWindowTitle)" }
+                $opened = $true
+                break
+              }
+            }
+            if (-not $opened) { throw 'Application did not open a window within 20 seconds' }
+            if (-not $process.CloseMainWindow()) { throw 'Application could not close normally' }
+            if (-not $process.WaitForExit(10000)) { throw 'Application did not exit after window close' }
+            if ($process.ExitCode -ne 0) { throw "Application exited with code $($process.ExitCode)" }
+            Write-Host 'Windows application opened and closed successfully.'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - name: Package documentation and checksum
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter *.pdb | Remove-Item
+          $hash = (Get-FileHash dist/MixerStudio.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MixerStudio.exe" | Set-Content dist/SHA256SUMS.txt -Encoding utf8
+          "Commit: ${{ github.sha }}" | Set-Content dist/BUILD.txt -Encoding utf8
+      - name: Upload downloadable Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MixerStudio-Windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
